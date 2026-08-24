@@ -1,0 +1,167 @@
+// public.charity — platform schema
+// Multi-tenant from commit one: every tenant-owned table carries organisationId.
+// Access goes through the tenant context in src/lib/tenant.ts — never query
+// tenant-owned tables directly from route handlers.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------- Tenancy ----------
+
+enum OrgStatus {
+  PENDING    // signed up, not yet verified against a charity register
+  VERIFIED   // matched against an official register entry
+  PUBLISHED  // visible in the public directory
+  SUSPENDED  // hidden pending moderation
+}
+
+enum RegisterSource {
+  CCEW // Charity Commission for England and Wales
+  OSCR // Scottish Charity Regulator
+  CCNI // Charity Commission for Northern Ireland
+  NONE // unregistered / exempt — listed with reduced trust markers
+}
+
+model Organisation {
+  id             String         @id @default(cuid())
+  slug           String         @unique
+  name           String
+  charityNumber  String?
+  registerSource RegisterSource @default(NONE)
+  verifiedAt     DateTime?
+  status         OrgStatus      @default(PENDING)
+
+  descriptionMd String  @default("")
+  causeTags     String[]
+  region        String?
+  website       String?
+  donateUrl     String? // the charity's OWN payment destination — money never touches this platform
+  logoUrl       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  modules     OrganisationModule[]
+  memberships Membership[]
+  apps        App[]
+
+  @@unique([registerSource, charityNumber])
+  @@index([status])
+}
+
+// A charity enables only the modules it wants. `directory` is always on.
+model OrganisationModule {
+  id             String   @id @default(cuid())
+  organisationId String
+  moduleKey      String // directory | apps | governance | meetings | projects ...
+  enabledAt      DateTime @default(now())
+  config         Json     @default("{}")
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+
+  @@unique([organisationId, moduleKey])
+}
+
+// ---------- People & auth (magic links, no passwords) ----------
+
+enum Role {
+  OWNER
+  ADMIN
+  EDITOR
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  isStaff   Boolean  @default(false) // platform moderators
+  createdAt DateTime @default(now())
+
+  memberships Membership[]
+  sessions    Session[]
+  loginTokens LoginToken[]
+}
+
+model Membership {
+  id             String @id @default(cuid())
+  userId         String
+  organisationId String
+  role           Role   @default(EDITOR)
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organisationId])
+}
+
+model LoginToken {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique // sha256 — raw token only ever lives in the email
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ---------- Apps module ----------
+
+enum AppStatus {
+  DRAFT
+  PENDING   // submitted, awaiting moderation
+  PUBLISHED
+  REJECTED
+}
+
+model App {
+  id             String    @id @default(cuid())
+  organisationId String
+  title          String
+  description    String    @default("")
+  url            String // the published app URL (Lovable or anywhere else)
+  screenshotUrl  String?
+  status         AppStatus @default(DRAFT)
+  moderatedById  String?
+  moderatedAt    DateTime?
+  moderationNote String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+
+  @@index([status])
+  @@index([organisationId])
+}
+
+// ---------- Audit ----------
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String? // null = system
+  action    String // e.g. org.update, app.submit, app.moderate
+  entity    String // "Organisation:abc123"
+  before    Json?
+  after     Json?
+  createdAt DateTime @default(now())
+
+  @@index([entity])
+  @@index([createdAt])
+}
