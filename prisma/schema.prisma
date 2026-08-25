@@ -220,6 +220,9 @@ model Twin {
   user         User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
   organisation Organisation? @relation(fields: [organisationId], references: [id], onDelete: Cascade)
   facts        TwinFact[]
+  stewardships Stewardship[] @relation("TwinStewardships")
+  stewardOf    Stewardship[] @relation("StewardOf")
+  grantedStewardships Stewardship[] @relation("StewardshipGrantedBy")
 
   @@unique([kind, slug])
   @@index([kind, status])
@@ -237,7 +240,8 @@ model Source {
   licence   String?
   url       String?
 
-  facts TwinFact[]
+  facts         TwinFact[]
+  stewardships  Stewardship[]
 }
 
 /// Controlled vocabulary for facts. A new attribute is an INSERT.
@@ -303,4 +307,41 @@ model TwinFact {
 
   @@index([twinId, attributeKey])
   @@index([attributeKey])
+}
+
+/// Who looks after a twin, and for how long.
+///
+/// This is what lets a house outlive its owners. Stewardship is an interval,
+/// not a flag: when a property sells, the seller's row is closed and the
+/// buyer's opens. Neither row is deleted, so the record of who was responsible
+/// when survives — and the seller stops seeing facts that only became true
+/// after they left.
+model Stewardship {
+  id     String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  twinId String @db.Uuid
+  /// The steward is itself a twin — a person or an organisation.
+  stewardTwinId String @db.Uuid
+  role          String @default("OWNER") // OWNER | OCCUPIER | MANAGER | CUSTODIAN
+
+  /// Half-open interval [fromAt, toAt). A null toAt means "still current".
+  /// Kept as two plain columns rather than a range type: the generated range
+  /// below exists only for the index and the exclusion constraint, so the
+  /// overlap rule lives in exactly one function and stays portable.
+  fromAt DateTime  @db.Timestamptz(3)
+  toAt   DateTime? @db.Timestamptz(3)
+
+  /// Provenance for the claim itself — a title number, a tenancy reference.
+  grantedByTwinId  String? @db.Uuid
+  evidenceSourceId String? @db.Uuid
+  evidenceRef      String?
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+
+  twin        Twin    @relation("TwinStewardships", fields: [twinId], references: [id], onDelete: Cascade)
+  stewardTwin Twin    @relation("StewardOf", fields: [stewardTwinId], references: [id], onDelete: Cascade)
+  grantedBy   Twin?   @relation("StewardshipGrantedBy", fields: [grantedByTwinId], references: [id])
+  evidence    Source? @relation(fields: [evidenceSourceId], references: [id])
+
+  @@index([stewardTwinId])
+  @@index([twinId])
 }
