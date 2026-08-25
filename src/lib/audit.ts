@@ -1,14 +1,24 @@
-import { prisma } from './db'
+import { prisma, type Tx } from './db'
 
-/** Append-only audit trail. Corrections are new records, never edits. */
-export function audit(params: {
-  actorId?: string | null
-  action: string
-  entity: string
-  before?: unknown
-  after?: unknown
-}) {
-  return prisma.auditLog.create({
+/**
+ * Append-only audit trail. Corrections are new records, never edits.
+ *
+ * Pass the transaction the change is happening in. Writing through the global
+ * client instead would put the audit record in its own transaction, so it could
+ * commit while the change it describes rolled back — or vanish while the change
+ * survived. An audit trail that disagrees with the data is worse than none.
+ */
+export function audit(
+  db: Tx | typeof prisma,
+  params: {
+    actorId?: string | null
+    action: string
+    entity: string
+    before?: unknown
+    after?: unknown
+  },
+) {
+  return db.auditLog.create({
     data: {
       actorId: params.actorId ?? null,
       action: params.action,

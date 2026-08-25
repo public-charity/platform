@@ -7,8 +7,8 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { cookies } from 'next/headers'
 import { prisma } from './db'
+import { SESSION_COOKIE } from './constants'
 
-const SESSION_COOKIE = 'pc_session'
 const SESSION_TTL_DAYS = 30
 const LOGIN_TOKEN_TTL_MIN = 15
 

@@ -1,9 +1,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { revalidatePath } from 'next/cache'
-import { currentUser } from '@/lib/auth'
-import { resolveTenant } from '@/lib/tenant'
-import { prisma } from '@/lib/db'
+import { withTenant } from '@/lib/tenant'
 import { audit } from '@/lib/audit'
 
 const LOVABLE_TEMPLATE_PROMPT = encodeURIComponent(
@@ -11,45 +9,55 @@ const LOVABLE_TEMPLATE_PROMPT = encodeURIComponent(
 )
 
 export default async function OrgApps({ params }: { params: Promise<{ org: string }> }) {
-  const user = await currentUser()
-  if (!user) redirect('/app/login')
   const { org } = await params
-  const tenant = await resolveTenant(user.id, org)
-
-  const appsEnabled = await tenant.moduleEnabled('apps')
+  // One actor context for the whole render, rather than one per query.
+  const { appsEnabled, apps } = await withTenant(org, async (tenant) => ({
+    appsEnabled: await tenant.moduleEnabled('apps'),
+    apps: await tenant.apps(),
+  }))
 
   async function enableApps() {
     'use server'
-    const user = await currentUser()
-    if (!user) redirect('/app/login')
-    const tenant = (await resolveTenant(user.id, org)).require('ADMIN')
-    await prisma.organisationModule.upsert({
-      where: { organisationId_moduleKey: { organisationId: tenant.org.id, moduleKey: 'apps' } },
-      create: { organisationId: tenant.org.id, moduleKey: 'apps' },
-      update: {},
+    await withTenant(org, async (tenant) => {
+      tenant.require('ADMIN')
+      await tenant.tx.organisationModule.upsert({
+        where: { organisationId_moduleKey: { organisationId: tenant.org.id, moduleKey: 'apps' } },
+        create: { organisationId: tenant.org.id, moduleKey: 'apps' },
+        update: {},
+      })
+      await audit(tenant.tx, {
+        actorId: tenant.user.id,
+        action: 'module.enable',
+        entity: `Organisation:${tenant.org.id}`,
+        after: { moduleKey: 'apps' },
+      })
     })
-    await audit({ actorId: user.id, action: 'module.enable', entity: `Organisation:${tenant.org.id}`, after: { moduleKey: 'apps' } })
     redirect(`/app/${org}/apps`)
   }
 
   async function submitApp(formData: FormData) {
     'use server'
-    const user = await currentUser()
-    if (!user) redirect('/app/login')
-    const tenant = (await resolveTenant(user.id, org)).require('EDITOR')
     const url = String(formData.get('url') ?? '')
     const title = String(formData.get('title') ?? '').trim().slice(0, 120)
     if (!title || !/^https:\/\/[^\s]+$/.test(url)) redirect(`/app/${org}/apps?error=invalid`)
-    const app = await prisma.app.create({
-      data: {
-        organisationId: tenant.org.id,
-        title,
-        description: String(formData.get('description') ?? '').slice(0, 500),
-        url,
-        status: 'PENDING',
-      },
+    await withTenant(org, async (tenant) => {
+      tenant.require('EDITOR')
+      const app = await tenant.tx.app.create({
+        data: {
+          organisationId: tenant.org.id,
+          title,
+          description: String(formData.get('description') ?? '').slice(0, 500),
+          url,
+          status: 'PENDING',
+        },
+      })
+      await audit(tenant.tx, {
+        actorId: tenant.user.id,
+        action: 'app.submit',
+        entity: `App:${app.id}`,
+        after: app,
+      })
     })
-    await audit({ actorId: user.id, action: 'app.submit', entity: `App:${app.id}`, after: app })
     revalidatePath('/apps')
     redirect(`/app/${org}/apps?submitted=1`)
   }
@@ -70,7 +78,6 @@ export default async function OrgApps({ params }: { params: Promise<{ org: strin
     )
   }
 
-  const apps = await tenant.apps()
 
   return (
     <main>

@@ -1,17 +1,13 @@
 import { redirect } from 'next/navigation'
-import { currentUser, signOut } from '@/lib/auth'
-import { resolveTenant } from '@/lib/tenant'
-import { prisma } from '@/lib/db'
+import { signOut } from '@/lib/auth'
+import { withTenant } from '@/lib/tenant'
 
 export default async function OrgSettings({ params }: { params: Promise<{ org: string }> }) {
-  const user = await currentUser()
-  if (!user) redirect('/app/login')
   const { org } = await params
-  const tenant = await resolveTenant(user.id, org)
-  const members = await prisma.membership.findMany({
-    where: { organisationId: tenant.org.id },
-    include: { user: true },
-  })
+  const { members, organisation } = await withTenant(org, async (tenant) => ({
+    members: await tenant.members(),
+    organisation: tenant.org,
+  }))
 
   async function doSignOut() {
     'use server'
@@ -37,8 +33,8 @@ export default async function OrgSettings({ params }: { params: Promise<{ org: s
       <p className="muted">Team invitations are coming shortly — for now, contact us to add colleagues.</p>
       <h2>Listing</h2>
       <p>
-        Status: <span className="badge">{tenant.org.status.toLowerCase()}</span>
-        {tenant.org.charityNumber && <> · Charity № {tenant.org.charityNumber}</>}
+        Status: <span className="badge">{organisation.status.toLowerCase()}</span>
+        {organisation.charityNumber && <> · Charity № {organisation.charityNumber}</>}
       </p>
       <h2>Account</h2>
       <form action={doSignOut}>
