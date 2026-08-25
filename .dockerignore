@@ -1,0 +1,39 @@
+# Keep the build context small and the image clean.
+#
+# Without this the context is ~1.0 GB across 33k files (node_modules 765M,
+# .next 243M), uploaded to the builder on every deploy.
+#
+# It also matters for correctness: the build stage does
+#   COPY --from=deps /app/node_modules ./node_modules
+#   COPY . .
+# so a host node_modules in the context overwrites the Linux install from the
+# deps stage with macOS-built binaries (Prisma's query engine is native).
+
+node_modules
+.next
+out
+build
+dist
+
+.git
+.gitignore
+
+# Secrets come from Fly at runtime; never bake a local .env into the image.
+.env
+.env.*
+!.env.example
+
+*.tsbuildinfo
+next-env.d.ts
+
+.DS_Store
+npm-debug.log*
+yarn-error.log*
+
+Dockerfile
+.dockerignore
+fly.toml
+README.md
+LICENSE
+AGENTS.md
+CLAUDE.md
