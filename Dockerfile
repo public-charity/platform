@@ -10,6 +10,11 @@ RUN npm ci --ignore-scripts
 FROM base AS build
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+# prisma.config.ts resolves env('DATABASE_URL') eagerly, and `generate` loads the
+# config even though it never opens a connection. Supply a placeholder for the build
+# only; the real URL arrives from Fly secrets at runtime. This used to work by
+# accident because `COPY . .` baked the developer's local .env into the image.
+ENV DATABASE_URL="postgresql://placeholder:placeholder@127.0.0.1:5432/placeholder"
 RUN npx prisma generate && npm run build
 
 FROM base AS runner
