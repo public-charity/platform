@@ -16,10 +16,12 @@ FROM base AS runner
 ENV NODE_ENV=production
 RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs
 
-# Next standalone server + assets
-COPY --from=build /app/.next/standalone ./
-COPY --from=build /app/.next/static ./.next/static
-COPY --from=build /app/public ./public
+# Next standalone server + assets.
+# --chown matters: the ISR cache is written at runtime as the `nextjs` user, and
+# root-owned files make revalidation fail with EACCES (pages then never refresh).
+COPY --from=build --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=build --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=build --chown=nextjs:nodejs /app/public ./public
 
 # Full node_modules overlays standalone's trimmed set. Needed because the
 # release command runs `prisma migrate deploy`, and the Prisma 7 CLI pulls in
