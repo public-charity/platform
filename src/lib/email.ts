@@ -2,10 +2,12 @@
  * Outbound email. In production this sends through an SMTP/API provider
  * (configure EMAIL_* secrets); in development it logs the link to stdout.
  */
-const BASE_URL = process.env.BASE_URL ?? 'http://localhost:3000'
+import { baseUrl } from './base-url'
 
 export async function sendLoginEmail(to: string, token: string) {
-  const link = `${BASE_URL}/app/auth?token=${token}`
+  // Same origin resolution as the auth redirect, so the link and the redirect
+  // it lands on can never disagree.
+  const link = `${await baseUrl()}/app/auth?token=${token}`
   const apiKey = process.env.RESEND_API_KEY
   if (!apiKey) {
     console.log(`[dev] magic link for ${to}: ${link}`)

@@ -31,6 +31,12 @@ export default async function Login({
       ) : (
         <>
           {error === 'email' && <p className="notice">That doesn’t look like an email address.</p>}
+          {error === 'expired' && (
+            <p className="notice">
+              That sign-in link has already been used or has expired. Enter your email and we’ll
+              send a fresh one.
+            </p>
+          )}
           <p className="muted">
             No passwords here. Enter your email and we send a one-time sign-in link.
           </p>
