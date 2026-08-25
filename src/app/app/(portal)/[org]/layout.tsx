@@ -29,6 +29,7 @@ export default async function OrgLayout({
       <nav className="site-nav" aria-label="Charity" style={{ marginLeft: 0, marginBottom: '1rem' }}>
         <strong>{name}</strong>
         <Link href={`/app/${org}`}>Overview</Link>
+        <Link href={`/app/${org}/events`}>Events</Link>
         <Link href={`/app/${org}/apps`}>Apps</Link>
         <Link href={`/app/${org}/settings`}>Settings</Link>
         <Link href={`/c/${org}`}>Public page ↗</Link>

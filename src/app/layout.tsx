@@ -22,6 +22,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               public<span>.charity</span>
             </Link>
             <nav className="site-nav" aria-label="Main">
+              <Link href="/whats-on">What&rsquo;s on</Link>
+              <Link href="/map">Map</Link>
               <Link href="/directory">Directory</Link>
               <Link href="/apps">Apps</Link>
               <Link href="/about">About</Link>
