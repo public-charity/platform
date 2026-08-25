@@ -49,6 +49,7 @@ model Organisation {
   modules     OrganisationModule[]
   memberships Membership[]
   apps        App[]
+  twin        Twin?
 
   @@unique([registerSource, charityNumber])
   @@index([status])
@@ -85,6 +86,7 @@ model User {
   memberships Membership[]
   sessions    Session[]
   loginTokens LoginToken[]
+  twin        Twin?
 }
 
 model Membership {
@@ -164,4 +166,141 @@ model AuditLog {
 
   @@index([entity])
   @@index([createdAt])
+}
+
+// ---------- Twins ----------
+// A twin is a durable record of a real thing: a person, a place, an event, an
+// organisation. Everything the platform knows is a fact attached to one.
+
+/// Registry of twin kinds. Adding a kind is an INSERT, not a migration —
+/// which is the whole reason `Twin.kind` is a foreign key and not an enum.
+model TwinKind {
+  key              String   @id // PERSON | PLACE | EVENT | ORG | AGENT ...
+  label            String
+  isPrivateDefault Boolean  @default(false) // PERSON => true
+  allowedGeometry  String[] // ['ST_Point'] | ['ST_LineString'] | [] — enforced by trigger
+  hasLifecycle     Boolean  @default(false) // EVENT => true; drives expiry
+  createdAt        DateTime @default(now()) @db.Timestamptz(3)
+
+  twins      Twin[]
+  attributes AttributeDef[]
+}
+
+model Twin {
+  id     String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  kind   String
+  status String @default("ACTIVE") // ACTIVE | MERGED | RETIRED
+
+  displayName String
+  slug        String?
+  /// Ceiling, not the whole story: a fact can be more private than its twin,
+  /// never more public.
+  visibility  String @default("PRIVATE") // PUBLIC | MEMBER | SELF
+
+  /// Lifecycle. Unbounded for PERSON/PLACE/ORG, bounded for EVENT.
+  validFrom DateTime? @db.Timestamptz(3)
+  validTo   DateTime? @db.Timestamptz(3)
+
+  /// Generic geometry rather than Point: a route is a line, an area is a
+  /// polygon. Which kinds may use which is enforced from TwinKind by trigger.
+  geom Unsupported("geometry(Geometry,4326)")?
+
+  /// A person's coarse location. Never a precise point — see the location
+  /// notes in the plan. Resolution 7 is roughly 5 km².
+  homeCellR7 BigInt?
+
+  /// 1:1 bridges to the pre-twin tables, so nothing has to be migrated at once.
+  userId         String? @unique
+  organisationId String? @unique
+
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+
+  twinKind     TwinKind      @relation(fields: [kind], references: [key])
+  user         User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organisation Organisation? @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  facts        TwinFact[]
+
+  @@unique([kind, slug])
+  @@index([kind, status])
+  @@index([homeCellR7])
+}
+
+/// Where a fact came from. Provenance is not optional: a fact with no source
+/// cannot be evaluated, contested, or refreshed.
+model Source {
+  id        String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  key       String  @unique // self | ccew_register | agent:matcher ...
+  kind      String // SELF | ORG | OPEN_DATA | REGULATOR | AGENT
+  label     String
+  trustTier Int     @default(1) // 0 unverified .. 3 statutory register
+  licence   String?
+  url       String?
+
+  facts TwinFact[]
+}
+
+/// Controlled vocabulary for facts. A new attribute is an INSERT.
+/// `category` is what consent is granted over — people release categories,
+/// not individual columns.
+model AttributeDef {
+  key               String    @id // 'place.waste.collection_day'
+  kindKey           String
+  label             String
+  valueType         String // TEXT | NUM | BOOL | TS | JSON
+  category          String // contact | location | household | interests ...
+  cardinality       String    @default("MANY") // ONE | MANY
+  sensitivity       Int       @default(0) // 0 ordinary .. 3 special category
+  defaultVisibility String    @default("SELF")
+  jsonSchema        Json?
+  deprecatedAt      DateTime? @db.Timestamptz(3)
+
+  twinKind TwinKind   @relation(fields: [kindKey], references: [key])
+  facts    TwinFact[]
+
+  @@index([category])
+}
+
+/// One assertion about one twin. Facts accumulate and supersede; they are
+/// never edited in place, so a correction never erases what was believed
+/// before and a house's history outlives its owners.
+model TwinFact {
+  id           String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  twinId       String @db.Uuid
+  attributeKey String
+
+  /// Sparse typed columns rather than a JSON blob: a number has to be
+  /// comparable and indexable. Exactly one is set (CHECK constraint).
+  valueText String?
+  valueNum  Decimal?  @db.Decimal(20, 6)
+  valueBool Boolean?
+  valueTs   DateTime? @db.Timestamptz(3)
+  valueJson Json?
+  unit      String?
+
+  sourceId       String   @db.Uuid
+  sourceRef      String?
+  assertedByTwin String?  @db.Uuid
+  assertedAt     DateTime @default(now()) @db.Timestamptz(3)
+  confidence     Decimal  @default(1.0) @db.Decimal(4, 3)
+
+  /// Access ceiling. Purpose scope deliberately lives on the consent grant,
+  /// not here — otherwise revoking would mean rewriting every affected fact.
+  visibility  String @default("SELF") // PUBLIC | MEMBER | CONSENTED | SELF
+  sensitivity Int    @default(0)
+
+  /// When the fact was true, which is not when the row was written.
+  validFrom DateTime  @default(now()) @db.Timestamptz(3)
+  validTo   DateTime? @db.Timestamptz(3)
+
+  supersedesId String?   @db.Uuid
+  disputedAt   DateTime? @db.Timestamptz(3)
+  redactedAt   DateTime? @db.Timestamptz(3)
+
+  twin      Twin         @relation(fields: [twinId], references: [id], onDelete: Restrict)
+  attribute AttributeDef @relation(fields: [attributeKey], references: [key])
+  source    Source       @relation(fields: [sourceId], references: [id])
+
+  @@index([twinId, attributeKey])
+  @@index([attributeKey])
 }
